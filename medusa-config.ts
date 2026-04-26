@@ -19,6 +19,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/geography",
     },
     {
+      resolve: "./src/modules/warehouse-routing",
+    },
+    {
       resolve: "@medusajs/medusa/cache-redis",
       options: { redisUrl: process.env.REDIS_URL },
     },

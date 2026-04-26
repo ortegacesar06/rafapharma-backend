@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-26
+> **Última actualización**: 2026-04-26 (Fase 2)
 
 ---
 
@@ -84,8 +84,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 1 completa, pendiente commit.
-**Próximo paso**: Fase 2 → paso 2.1.
+**Fase activa**: Fase 2 completa, pendiente commit.
+**Próximo paso**: Fase 3 → paso 3.1.
 
 ---
 
@@ -122,14 +122,11 @@ src/
 
 **Objetivo**: Cada bodega declara qué cantones cubre, con prioridad. Base para el ruteo.
 
-- [ ] **2.1** Crear módulo `src/modules/warehouse-routing/`:
-  - Modelo: `WarehouseServiceArea` (stock_location_id, canton_id, priority, surcharge_amount).
-  - `priority` = más bajo = primera opción.
-  - `surcharge_amount` = recargo cuando esa bodega despacha a ese cantón (ej: 0 si es local, $X si es desde otra ciudad).
-- [ ] **2.2** Module link `StockLocation ↔ WarehouseServiceArea` y `Canton ↔ WarehouseServiceArea`.
-- [ ] **2.3** Admin endpoints CRUD de service areas.
-- [ ] **2.4** Seed: 1-2 bodegas iniciales (ej: Quito, Guayaquil) con su cobertura.
-- [ ] **2.5** Test: dado un cantón, retorna lista de bodegas ordenadas por prioridad.
+- [x] **2.1** Módulo `src/modules/warehouse-routing/` con modelo `WarehouseServiceArea` (stock_location_id, canton_id, priority, surcharge_amount). Migración `Migration20260426215858.ts`. Índice único `(stock_location_id, canton_id)`.
+- [x] **2.2** Module links en `src/links/`: `stock-location-service-area.ts` y `canton-service-area.ts` (ambos `isList: true`).
+- [x] **2.3** Admin CRUD: `GET/POST /admin/warehouse-service-areas` y `GET/POST/DELETE /admin/warehouse-service-areas/[id]`.
+- [x] **2.4** Seed `src/scripts/seed-warehouses.ts`: crea Bodega Quito (Pichincha) y Bodega Guayaquil (Guayas), idempotente; service area por cada cantón con priority 0/recargo 0 si es local a la provincia, priority 100/recargo $5 fuera.
+- [x] **2.5** Test integration:modules en `src/modules/warehouse-routing/__tests__/warehouse-routing.spec.ts` (orden por prioridad, unique constraint, filtro por bodega). Requirió `.env.test` con `DB_HOST`/`DB_USERNAME`/`DB_PASSWORD`/`DB_TEMP_NAME`.
 
 **Criterio de hecho**: dado cualquier cantón ecuatoriano, el sistema sabe qué bodegas pueden despacharlo y con qué recargo.
 
@@ -342,3 +339,4 @@ src/
 | 2026-04-25 | D11 cerrado: 3 providers (PayPhone + DeUna + transferencia manual) con rollout por fases. Fase 9 dividida en 9.A (manual, bloqueante go-live), 9.B (PayPhone), 9.C (DeUna), 9.D (selección). | Permite lanzar con transferencia manual mientras se cierran contratos con PayPhone y DeUna. |
 | 2026-04-26 | Fase 0 completada (0.1–0.6). Stack: Medusa v2.14.0, Postgres 17, Redis 7. Monorepo del template aplanado a raíz. `legacy-peer-deps=true` en `.npmrc` por conflicto react 18/19 entre paquetes Medusa. | Bootstrap del proyecto. |
 | 2026-04-26 | Fase 1 completada. Módulo `geography` con `Province`/`Canton`, seed INEC (24 + 221) y endpoints store. Cantones hardcodeados (opción b) en lugar de descargar dataset INEC en runtime. | Evita dependencia de URLs externas; el DPA es estable y los cambios futuros son PRs puntuales. |
+| 2026-04-26 | Fase 2 completada. Módulo `warehouse-routing` con `WarehouseServiceArea`, links a StockLocation y Canton, CRUD admin, seed Quito+Guayaquil (442 service areas) y tests integration:modules. | Base para el ruteo geográfico de fulfillment. |
