@@ -84,8 +84,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 0 — pendiente solo el commit inicial (0.7).
-**Próximo paso**: Fase 1 → paso 1.1.
+**Fase activa**: Fase 1 completa, pendiente commit.
+**Próximo paso**: Fase 2 → paso 2.1.
 
 ---
 
@@ -109,15 +109,10 @@ src/
 
 **Objetivo**: Modelo de provincias y cantones disponibles para uso por warehouse-routing y direcciones de cliente.
 
-- [ ] **1.1** Crear módulo `src/modules/geography/`:
-  - Modelos: `Province` (id, code, name), `Canton` (id, province_id, code, name).
-  - Migración inicial.
-- [ ] **1.2** Seed con datos del INEC (24 provincias, ~221 cantones). Script en `src/scripts/seed-geography.ts`.
-  - Fuente: [INEC - DPA](https://www.ecuadorencifras.gob.ec/) o dataset DPA. Confirmar fuente exacta antes de seedear.
-- [ ] **1.3** Endpoints store API:
-  - `GET /store/provinces` → lista provincias.
-  - `GET /store/provinces/:id/cantons` → cantones de una provincia.
-- [ ] **1.4** Test: seed corre, endpoints devuelven 24 provincias.
+- [x] **1.1** Módulo `src/modules/geography/` con modelos `Province` y `Canton` (relación `hasMany`/`belongsTo`). Migración `Migration20260426174208.ts`.
+- [x] **1.2** Seed `src/scripts/seed-geography.ts` con 24 provincias y 221 cantones (dataset hardcodeado en `seed-geography-data.ts`, basado en INEC DPA post-2013). Idempotente: salta los que ya existen.
+- [x] **1.3** Endpoints `GET /store/provinces` y `GET /store/provinces/:id/cantons`.
+- [x] **1.4** Tests unitarios sobre el dataset (24 provincias, 221 cantones, códigos únicos, formato `<province_code><nn>`); endpoints validados manualmente vía curl.
 
 **Criterio de hecho**: storefront puede armar dropdowns provincia → cantón.
 
@@ -346,3 +341,4 @@ src/
 | 2026-04-25 | Agregadas D9–D11 (solo backend, Brevo, PayPhone+transferencia). Nuevas Fases 8 (Notificaciones) y 9 (Pagos) | Cierre de temas abiertos. Modalidad QR de D11 sigue pendiente. |
 | 2026-04-25 | D11 cerrado: 3 providers (PayPhone + DeUna + transferencia manual) con rollout por fases. Fase 9 dividida en 9.A (manual, bloqueante go-live), 9.B (PayPhone), 9.C (DeUna), 9.D (selección). | Permite lanzar con transferencia manual mientras se cierran contratos con PayPhone y DeUna. |
 | 2026-04-26 | Fase 0 completada (0.1–0.6). Stack: Medusa v2.14.0, Postgres 17, Redis 7. Monorepo del template aplanado a raíz. `legacy-peer-deps=true` en `.npmrc` por conflicto react 18/19 entre paquetes Medusa. | Bootstrap del proyecto. |
+| 2026-04-26 | Fase 1 completada. Módulo `geography` con `Province`/`Canton`, seed INEC (24 + 221) y endpoints store. Cantones hardcodeados (opción b) en lugar de descargar dataset INEC en runtime. | Evita dependencia de URLs externas; el DPA es estable y los cambios futuros son PRs puntuales. |
