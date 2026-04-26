@@ -23,6 +23,7 @@ Tienda virtual de suplementos (fitness) para Ecuador. **Backend headless** en Me
 | D9 | Solo backend, NO monorepo |
 | D10 | Email: Brevo (SDK `@getbrevo/brevo`) |
 | D11 | Pagos: 3 providers (PayPhone + DeUna + transferencia manual). Solo transferencia manual activa al go-live; PayPhone y DeUna desactivados en config hasta cierre de contratos |
+| D12 | Ruteo en `order.placed` (Fase 4) solo persiste decisión + ajusta reservaciones; NO crea Fulfillments automáticos. Fallback unified sin bodega completa → `requires_manual_routing`. Cantón destino en `shipping_address.metadata.canton_id` |
 
 ## Convenciones de arquitectura
 

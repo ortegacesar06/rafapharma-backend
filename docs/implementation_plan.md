@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-26 (Fase 3)
+> **Última actualización**: 2026-04-26 (Fase 4)
 
 ---
 
@@ -45,6 +45,7 @@
 | D8 | Chat IA = solo libre (recomendar + responder). Sin agendamiento humano | Scope reducido para fase final |
 | D9 | Estructura = solo backend (sin monorepo) | Storefront se construirá aparte cuando se decida; este repo es backend headless |
 | D10 | Email provider = Brevo (transaccional + listas) | Free tier suficiente para arranque, SDK oficial, soporta listas para flash promo emails |
+| D12 | Fase 4: ruteo en `order.placed` solo **persiste decisión + ajusta reservaciones**, **NO crea Fulfillments** automáticos (Opción A). Si modo `unified` no encuentra bodega completa, orden queda `requires_manual_routing` (no split, no cancelar). El cantón destino se lee de `shipping_address.metadata.canton_id`. | Mantiene control humano sobre el despacho físico. Marcar para revisión manual es lo más conservador frente a contradecir el flag o cancelar la orden. |
 | D11 | Pagos = **3 providers independientes**: (a) PayPhone (tarjeta + QR), (b) DeUna API directa, (c) transferencia manual. **Rollout en fases**: solo (c) activa al inicio; (a) y (b) se prenden cuando se cierren los contratos con cada proveedor. Cada provider es un módulo Medusa que se activa/desactiva en `medusa-config.ts` (región Ecuador → `payment_providers`). | Permite lanzar la tienda con el método más simple (sin dependencia de contratos); luego prender PayPhone y DeUna sin reescribir código. |
 
 ---
@@ -84,8 +85,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 3 completa, pendiente commit.
-**Próximo paso**: Fase 4 → paso 4.1.
+**Fase activa**: Fase 4 completa, pendiente commit.
+**Próximo paso**: Fase 5 → paso 5.1.
 
 ---
 
@@ -149,23 +150,14 @@ src/
 
 **Objetivo**: Decidir desde qué bodega(s) sale cada orden.
 
-- [ ] **4.1** Workflow `suggest-warehouse` (read-only, para storefront en checkout):
-  - Input: cantón destino, items del carrito.
-  - Output: bodega(s) sugerida(s) + recargo + indicador de split.
-- [ ] **4.2** Workflow `route-fulfillment` (escribe, se ejecuta en `order.placed`):
-  - **Lógica**:
-    1. ¿Algún ítem tiene `requires_unified_shipment=true`? → modo `unified`. Caso contrario → modo `optimal`.
-    2. **Modo unified**: buscar bodega con MAYOR prioridad para el cantón destino que tenga TODOS los ítems en stock. Si no hay, escalar a la siguiente. Aplicar recargo de esa bodega.
-    3. **Modo optimal**: para cada ítem, asignar a la bodega más prioritaria con stock. Permitir split (múltiples shipments). Recargo según bodega de cada split.
-    4. Reservar inventario en la(s) bodega(s) elegida(s).
-    5. Generar shipment(s) en Medusa.
-- [ ] **4.3** Subscriber a `order.placed` que dispara el workflow.
-- [ ] **4.4** Tests:
-  - Carrito sin flag, todo en stock local → 1 shipment, sin recargo.
-  - Carrito sin flag, parte en bodega lejana → 2 shipments, recargo en la lejana.
-  - Carrito con flag y bodega local sin todo → 1 shipment desde bodega lejana con recargo.
-  - Carrito con flag sin ninguna bodega completa → error / fallback definido (decidir).
-- [ ] **4.5** Endpoint store `POST /store/cart/shipping-preview` que llama `suggest-warehouse` para el checkout.
+- [x] **4.1** Workflow `suggest-warehouse` (read-only) en `src/workflows/fulfillment/`. Algoritmo extraído como función pura `buildRoutingPlan()` (`build-routing-plan.ts`); el step `compute-routing-plan` resuelve service areas (vía módulo `warehouse-routing`) + variantes/inventario/`product.shipping_rule` (vía `query.graph`) y delega.
+- [x] **4.2** Workflow `route-fulfillment` (`route-fulfillment.ts`) compuesto por: `load-order-routing-input` (lee canton de `order.shipping_address.metadata.canton_id`) → `compute-routing-plan` → `persist-order-routing` (módulo nuevo `order-routing` + module link Order↔OrderRouting) → `replace-order-reservations` (vía `when(plan.routable)`). Compensación: el step de persistencia borra el routing creado; el de reservas restaura las anteriores.
+- [x] **4.3** Subscriber `src/subscribers/route-order-fulfillment.ts` al evento `order.placed`.
+- [x] **4.4** Tests:
+  - Unit: `build-routing-plan.unit.spec.ts` cubre los 4 escenarios (T1–T4) + edge cases (sin service areas, sin stock global, prioridad, `required_quantity > 1`).
+  - Integration:modules: `order-routing.spec.ts` valida CRUD del módulo (creación con shipments, unique por order_id, status `requires_manual_routing`).
+  - Decisión sobre el fallback (T4): orden marcada `status=requires_manual_routing` (D adicional, ver decisión D12 abajo); no se hace split forzado ni se cancela.
+- [x] **4.5** Endpoint store `POST /store/cart/shipping-preview` (`src/api/store/cart/shipping-preview/route.ts`). Acepta `cart_id` (auto-resuelve canton+items) o `canton_id`+`items` explícitos.
 
 **Criterio de hecho**: una orden colocada se rutea automáticamente; storefront ve preview de costos antes de pagar.
 
@@ -339,4 +331,5 @@ src/
 | 2026-04-26 | Fase 0 completada (0.1–0.6). Stack: Medusa v2.14.0, Postgres 17, Redis 7. Monorepo del template aplanado a raíz. `legacy-peer-deps=true` en `.npmrc` por conflicto react 18/19 entre paquetes Medusa. | Bootstrap del proyecto. |
 | 2026-04-26 | Fase 1 completada. Módulo `geography` con `Province`/`Canton`, seed INEC (24 + 221) y endpoints store. Cantones hardcodeados (opción b) en lugar de descargar dataset INEC en runtime. | Evita dependencia de URLs externas; el DPA es estable y los cambios futuros son PRs puntuales. |
 | 2026-04-26 | Fase 2 completada. Módulo `warehouse-routing` con `WarehouseServiceArea`, links a StockLocation y Canton, CRUD admin, seed Quito+Guayaquil (442 service areas) y tests integration:modules. | Base para el ruteo geográfico de fulfillment. |
+| 2026-04-26 | Fase 4 completada. Módulo `order-routing` (`OrderRouting` 1:1 a Order vía link, `OrderRoutingShipment` hasMany). Workflows `suggest-warehouse` y `route-fulfillment` con steps separados (carga input, computa plan, persiste, reemplaza reservaciones). Algoritmo extraído a función pura `buildRoutingPlan` para tests unitarios de los 4 escenarios sin DB. Subscriber a `order.placed`. Endpoint `POST /store/cart/shipping-preview`. Decidido D12: la fase 4 NO crea Fulfillments automáticos (solo persiste ruteo + reservaciones); fallback unified sin bodega completa = `requires_manual_routing`. Cantón destino se lee de `shipping_address.metadata.canton_id`. | Habilita ruteo automático en checkout y al confirmar orden, manteniendo control humano sobre el despacho físico. |
 | 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
