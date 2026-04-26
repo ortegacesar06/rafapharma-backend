@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-26 (Fase 2)
+> **Última actualización**: 2026-04-26 (Fase 3)
 
 ---
 
@@ -84,8 +84,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 2 completa, pendiente commit.
-**Próximo paso**: Fase 3 → paso 3.1.
+**Fase activa**: Fase 3 completa, pendiente commit.
+**Próximo paso**: Fase 4 → paso 4.1.
 
 ---
 
@@ -136,11 +136,10 @@ src/
 
 **Objetivo**: Permitir marcar productos como "no separable del resto del envío".
 
-- [ ] **3.1** Extender `Product` con campo custom `requires_unified_shipment: boolean` (default false).
-  - Vía module link a un nuevo módulo `product-shipping-rules` o como custom field en Product (decidir según limitaciones de Medusa v2).
-- [ ] **3.2** Migración.
-- [ ] **3.3** Admin UI: checkbox en formulario de producto.
-- [ ] **3.4** Test: crear producto con flag, leerlo, verificar persistencia.
+- [x] **3.1** Módulo `src/modules/product-shipping-rules/` con modelo `ProductShippingRule` (`product_id` único, `requires_unified_shipment` boolean default false). Module link Product ↔ ProductShippingRule en `src/links/product-shipping-rule.ts` (1:1, no `isList`).
+- [x] **3.2** Migración `Migration20260426221243.ts` (vía `medusa db:generate product_shipping_rules`) + `medusa db:sync-links`.
+- [x] **3.3** Admin: endpoint `GET/POST /admin/products/:id/shipping-rule` (upsert por product_id, crea link en el primer POST). Widget Admin UI en `src/admin/widgets/product-shipping-rule.tsx` (zona `product.details.after`) con Switch.
+- [x] **3.4** Test integration:modules en `src/modules/product-shipping-rules/__tests__/product-shipping-rules.spec.ts` (default false, persistencia, unique por product_id, toggle vía update).
 
 **Criterio de hecho**: admin puede marcar productos como "envío unificado obligatorio".
 
@@ -340,3 +339,4 @@ src/
 | 2026-04-26 | Fase 0 completada (0.1–0.6). Stack: Medusa v2.14.0, Postgres 17, Redis 7. Monorepo del template aplanado a raíz. `legacy-peer-deps=true` en `.npmrc` por conflicto react 18/19 entre paquetes Medusa. | Bootstrap del proyecto. |
 | 2026-04-26 | Fase 1 completada. Módulo `geography` con `Province`/`Canton`, seed INEC (24 + 221) y endpoints store. Cantones hardcodeados (opción b) en lugar de descargar dataset INEC en runtime. | Evita dependencia de URLs externas; el DPA es estable y los cambios futuros son PRs puntuales. |
 | 2026-04-26 | Fase 2 completada. Módulo `warehouse-routing` con `WarehouseServiceArea`, links a StockLocation y Canton, CRUD admin, seed Quito+Guayaquil (442 service areas) y tests integration:modules. | Base para el ruteo geográfico de fulfillment. |
+| 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
