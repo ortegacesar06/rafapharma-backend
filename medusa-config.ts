@@ -45,6 +45,9 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/product-pack",
     },
+    {
+      resolve: "./src/modules/flash-promotion",
+    },
     ...(process.env.BREVO_API_KEY
       ? [
           {

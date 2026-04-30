@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-30 (Fase 8.1–8.4)
+> **Última actualización**: 2026-04-30 (Fase 6 + Fase 8.1–8.4)
 
 ---
 
@@ -86,8 +86,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 8.1–8.4 completas (Brevo provider listo); arrancando Fase 6.
-**Próximo paso**: Fase 6 → paso 6.1.
+**Fase activa**: Fase 6 completa, pendiente commit. Fase 8.1–8.4 completas; quedan 8.5 (sync customers ↔ Brevo) y 8.6 (smoke test).
+**Próximo paso**: Fase 7 → paso 7.1 (AI Assistant).
 
 ---
 
@@ -186,24 +186,17 @@ src/
 
 **Objetivo**: Promociones por tiempo limitado con countdown, límite global de unidades opcional, email opcional.
 
-- [ ] **6.1** Crear módulo `src/modules/flash-promotion/`:
-  - Modelo `FlashPromotion` (link a `Promotion` nativo): `units_limit` (nullable), `units_sold` (default 0), `notify_on_activate` (bool), `notification_segment` (nullable, ej: "newsletter_subscribers").
-- [ ] **6.2** Module link `Promotion ↔ FlashPromotion`.
-- [ ] **6.3** Admin UI: al crear/editar Promotion, sección extra "Flash" con los 3 campos.
-- [ ] **6.4** Workflow `decrement-flash-units` (atómico, usa transacción / `UPDATE ... WHERE units_sold < units_limit`):
-  - Si `units_sold >= units_limit`, la promo se desactiva (no aplicable a nuevos carts).
-  - Se ejecuta al confirmar orden, no al agregar al carrito (decisión: confirmar al pago).
-- [ ] **6.5** Subscriber a `order.placed` decrementa unidades.
-- [ ] **6.6** Workflow `activate-flash-promotion`:
-  - Al iniciar `Campaign.starts_at`, si `notify_on_activate=true`, encolar emails al segmento.
-- [ ] **6.7** Cron job `expire-flash-promotions` (cada minuto):
-  - Revisa campañas expiradas, marca promos como inactivas.
-- [ ] **6.8** Endpoint store `GET /store/flash-promotions/active` que retorna:
-  - `id`, `name`, `ends_at`, `time_remaining_seconds`, `units_remaining` (si aplica).
-- [ ] **6.9** Tests:
-  - Promo con límite 100, vender 100 → la 101 no aplica.
-  - Promo expira en 24h → cron la desactiva.
-  - Activación dispara email (mock).
+- [x] **6.1** Módulo `src/modules/flash-promotion/` con `FlashPromotion` (`promotion_id` único, `units_limit` nullable, `units_sold` default 0, `notify_on_activate` bool, `notification_segment` nullable, `notified_at` nullable). Migración `Migration20260430163518.ts`.
+- [x] **6.2** Module link `Promotion ↔ FlashPromotion` (1:1) en `src/links/flash-promotion.ts`.
+- [x] **6.3** Admin endpoints `GET/POST/DELETE /admin/promotions/:id/flash` (upsert, crea link en el primer POST). Widget `src/admin/widgets/flash-promotion.tsx` (zone `promotion.details.after`) con inputs para los 3 campos + contador de vendidas vs límite.
+- [x] **6.4** Workflow `decrement-flash-units` con step atómico: `UPDATE flash_promotion SET units_sold = units_sold + ? WHERE promotion_id = ? AND (units_limit IS NULL OR units_sold + ? <= units_limit) RETURNING ...`. Si la fila resultante alcanza el límite, el step llama `Modules.PROMOTION.updatePromotions({ status: PromotionStatus.INACTIVE })` para desactivar la promo nativa. Compensación: decrementa lo que se aplicó. Cf. test "is atomic under concurrent increments" (20 increments paralelos en límite 10 → 10 aceptados / 10 rechazados, units_sold final = 10).
+- [x] **6.5** Subscriber `src/subscribers/decrement-flash-units.ts` lee `items[].adjustments[].promotion_id` vía `query.graph`, agrega cantidad por promotion (función pura `buildFlashRequests`) y dispara el workflow. Decisión confirmada: se ejecuta en `order.placed` (no al agregar al carrito).
+- [x] **6.6** Workflow `activate-flash-promotion` con step `notify-flash-activation`: resuelve `Modules.NOTIFICATION` (skip silencioso si Brevo no está cargado), envía template `flash-promotion-activated` a los recipients del segmento, marca `notified_at`. Resolución de segmento es placeholder hasta Fase 8.5 (sync con listas Brevo).
+- [x] **6.7** Cron `src/jobs/expire-flash-promotions.ts` (`* * * * *`): para cada flash promo (a) si `starts_at <= now` y `notified_at` vacío y `notify_on_activate=true` → dispara `activate-flash-promotion`; (b) si `ends_at <= now` y status no es inactive → desactiva la promo nativa. Idempotente.
+- [x] **6.8** Endpoint `GET /store/flash-promotions/active` retorna sólo promos activas, dentro de ventana, no agotadas. Cada item incluye `time_remaining_seconds`, `units_remaining` (cuando hay límite), `code`, `campaign_name`, `starts_at`, `ends_at`.
+- [x] **6.9** Tests:
+  - Unit: `build-flash-requests.unit.spec.ts` (5 escenarios: vacío, sin promos, agregación cross-item, dedup multi-adjustment del mismo promo, qty<=0).
+  - Integration:modules: `flash-promotion.spec.ts` (9 tests, incluye atomicidad con 20 promesas paralelas y `markNotified` idempotente).
 
 **Criterio de hecho**: admin crea flash promo de 24h con límite de 50 unidades; storefront muestra countdown y límite; al venderse 50, deja de aplicar.
 
@@ -327,5 +320,6 @@ src/
 | 2026-04-26 | Fase 2 completada. Módulo `warehouse-routing` con `WarehouseServiceArea`, links a StockLocation y Canton, CRUD admin, seed Quito+Guayaquil (442 service areas) y tests integration:modules. | Base para el ruteo geográfico de fulfillment. |
 | 2026-04-26 | Fase 4 completada. Módulo `order-routing` (`OrderRouting` 1:1 a Order vía link, `OrderRoutingShipment` hasMany). Workflows `suggest-warehouse` y `route-fulfillment` con steps separados (carga input, computa plan, persiste, reemplaza reservaciones). Algoritmo extraído a función pura `buildRoutingPlan` para tests unitarios de los 4 escenarios sin DB. Subscriber a `order.placed`. Endpoint `POST /store/cart/shipping-preview`. Decidido D12: la fase 4 NO crea Fulfillments automáticos (solo persiste ruteo + reservaciones); fallback unified sin bodega completa = `requires_manual_routing`. Cantón destino se lee de `shipping_address.metadata.canton_id`. | Habilita ruteo automático en checkout y al confirmar orden, manteniendo control humano sobre el despacho físico. |
 | 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
+| 2026-04-30 | Fase 6 completada. Módulo `flash-promotion` (link 1:1 a Promotion nativo). Atomicidad implementada con `UPDATE ... WHERE units_sold + qty <= units_limit RETURNING` directo contra el EntityManager (sin transacción de Mikro), validado con test de 20 increments concurrentes. Decisión de ejecución: `order.placed` (subscriber dispara workflow `decrement-flash-units` que también desactiva la promo nativa al alcanzar límite). Activación de emails y expiración corren en cron `* * * * *` (`expire-flash-promotions`). Resolución de segmentos para emails es placeholder hasta Fase 8.5 (sync customers ↔ listas Brevo). | Habilita flash sales con countdown + límite global atómico. |
 | 2026-04-30 | Fase 8.1–8.4 completadas (adelantadas antes de Fase 6 porque 6.6 envía emails). Módulo `notification-brevo` con `@getbrevo/brevo` v5. Provider opt-in via `BREVO_API_KEY` env (si no está seteado, no se carga el módulo de notificaciones — evita romper dev/test). Subscriber `order-placed-email` ya activo. Falta 8.5 (sync customers ↔ listas Brevo) y 8.6 (smoke test real). | Habilita el envío de emails que requiere Fase 6.6 (activar flash promo). |
 | 2026-04-29 | Fase 5 completada (D13 nueva). Módulo `product-pack` con `ProductPack`/`PackItem`, link 1:1 a Product, admin endpoint upsert + delete. Integración con fulfillment vía expansión pura `expandPackItems` dentro de `compute-routing-plan`: si una variante del input es de un Product que tiene ProductPack, se reemplaza por sus componentes (qty×qty, mismo line_item_id) antes de buildRoutingPlan, y se fuerza `requires_unified_shipment=true` para todos. Reservaciones aterrizan en componentes vía `replace-order-reservations` existente — no hizo falta workflow `reserve-pack-inventory` separado. Stock del pack se calcula on-the-fly desde el componente más escaso (no se mantiene inventario propio). | Permite vender productos compuestos sin duplicar contadores de stock y aprovechando pricing/SEO/imágenes nativos de Product. |

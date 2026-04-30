@@ -27,3 +27,6 @@ build
 !.yarn/versions
 
 .medusa
+
+# Mikro-ORM snapshot files generated during integration tests
+**/migrations/.snapshot-*.json
