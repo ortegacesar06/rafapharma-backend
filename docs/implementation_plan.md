@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-29 (Fase 5)
+> **Última actualización**: 2026-04-30 (Fase 8.1–8.4)
 
 ---
 
@@ -86,7 +86,7 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 5 completa, pendiente commit.
+**Fase activa**: Fase 8.1–8.4 completas (Brevo provider listo); arrancando Fase 6.
 **Próximo paso**: Fase 6 → paso 6.1.
 
 ---
@@ -244,10 +244,10 @@ src/
 
 > Nota: aunque está numerada 8, partes de esta fase se necesitan antes (Fase 6 envía emails de flash promo activada). **Hacer 8.1–8.4 después de Fase 0** y dejar 8.5+ para después.
 
-- [ ] **8.1** Crear módulo `src/modules/notification-brevo/` implementando la interfaz de `Notification Provider` de Medusa v2.
-- [ ] **8.2** Configurar API key de Brevo en `.env` (`BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME`).
-- [ ] **8.3** Templates iniciales en Brevo (o como archivos): order-placed, order-shipped, order-delivered, password-reset.
-- [ ] **8.4** Subscribers a eventos Medusa (`order.placed`, etc.) que disparan emails.
+- [x] **8.1** Módulo `src/modules/notification-brevo/` con `BrevoNotificationProviderService` (extiende `AbstractNotificationProviderService`, identifier `brevo`) + `index.ts` con `ModuleProvider(Modules.NOTIFICATION, ...)`. Usa SDK `@getbrevo/brevo` v5 (`BrevoClient.transactionalEmails.sendTransacEmail`). Registrado bajo `@medusajs/medusa/notification` en `medusa-config.ts` con guard `process.env.BREVO_API_KEY` (si no está seteado, el módulo no se carga — útil para dev/test sin credenciales).
+- [x] **8.2** `.env.template` con `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME`, `BREVO_REPLY_TO_EMAIL`, `BREVO_REPLY_TO_NAME` y `BREVO_TEMPLATE_*` para los 4 templates iniciales.
+- [x] **8.3** Mapping de templates simbólicos (`order-placed`, `order-shipped`, `order-delivered`, `password-reset`) → IDs numéricos de Brevo vía `options.templates` (poblado desde env). Si no está mapeado pero el `template` es numérico, se usa directo. Templates HTML viven en el panel de Brevo (no como archivos en repo).
+- [x] **8.4** Subscriber `src/subscribers/order-placed-email.ts` resuelve `Modules.NOTIFICATION` y llama `createNotifications` con datos de orden (display_id, items, totales, shipping_address) leídos vía `query.graph`. Errores se loggean sin propagar para no bloquear ruteo de fulfillment.
 - [ ] **8.5** Sincronizar `Customer` con listas de Brevo (segmentos para flash promo emails).
 - [ ] **8.6** Tests de smoke: enviar a un email real en sandbox.
 
@@ -327,4 +327,5 @@ src/
 | 2026-04-26 | Fase 2 completada. Módulo `warehouse-routing` con `WarehouseServiceArea`, links a StockLocation y Canton, CRUD admin, seed Quito+Guayaquil (442 service areas) y tests integration:modules. | Base para el ruteo geográfico de fulfillment. |
 | 2026-04-26 | Fase 4 completada. Módulo `order-routing` (`OrderRouting` 1:1 a Order vía link, `OrderRoutingShipment` hasMany). Workflows `suggest-warehouse` y `route-fulfillment` con steps separados (carga input, computa plan, persiste, reemplaza reservaciones). Algoritmo extraído a función pura `buildRoutingPlan` para tests unitarios de los 4 escenarios sin DB. Subscriber a `order.placed`. Endpoint `POST /store/cart/shipping-preview`. Decidido D12: la fase 4 NO crea Fulfillments automáticos (solo persiste ruteo + reservaciones); fallback unified sin bodega completa = `requires_manual_routing`. Cantón destino se lee de `shipping_address.metadata.canton_id`. | Habilita ruteo automático en checkout y al confirmar orden, manteniendo control humano sobre el despacho físico. |
 | 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
+| 2026-04-30 | Fase 8.1–8.4 completadas (adelantadas antes de Fase 6 porque 6.6 envía emails). Módulo `notification-brevo` con `@getbrevo/brevo` v5. Provider opt-in via `BREVO_API_KEY` env (si no está seteado, no se carga el módulo de notificaciones — evita romper dev/test). Subscriber `order-placed-email` ya activo. Falta 8.5 (sync customers ↔ listas Brevo) y 8.6 (smoke test real). | Habilita el envío de emails que requiere Fase 6.6 (activar flash promo). |
 | 2026-04-29 | Fase 5 completada (D13 nueva). Módulo `product-pack` con `ProductPack`/`PackItem`, link 1:1 a Product, admin endpoint upsert + delete. Integración con fulfillment vía expansión pura `expandPackItems` dentro de `compute-routing-plan`: si una variante del input es de un Product que tiene ProductPack, se reemplaza por sus componentes (qty×qty, mismo line_item_id) antes de buildRoutingPlan, y se fuerza `requires_unified_shipment=true` para todos. Reservaciones aterrizan en componentes vía `replace-order-reservations` existente — no hizo falta workflow `reserve-pack-inventory` separado. Stock del pack se calcula on-the-fly desde el componente más escaso (no se mantiene inventario propio). | Permite vender productos compuestos sin duplicar contadores de stock y aprovechando pricing/SEO/imágenes nativos de Product. |

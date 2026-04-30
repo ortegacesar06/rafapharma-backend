@@ -2,6 +2,21 @@ import { loadEnv, defineConfig, Modules } from "@medusajs/framework/utils";
 
 loadEnv(process.env.NODE_ENV || "development", process.cwd());
 
+const parseTemplateId = (raw: string | undefined): number | undefined => {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+};
+
+const brevoTemplates = Object.fromEntries(
+  Object.entries({
+    "order-placed": parseTemplateId(process.env.BREVO_TEMPLATE_ORDER_PLACED),
+    "order-shipped": parseTemplateId(process.env.BREVO_TEMPLATE_ORDER_SHIPPED),
+    "order-delivered": parseTemplateId(process.env.BREVO_TEMPLATE_ORDER_DELIVERED),
+    "password-reset": parseTemplateId(process.env.BREVO_TEMPLATE_PASSWORD_RESET),
+  }).filter(([, v]) => v !== undefined)
+) as Record<string, number>;
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -30,6 +45,30 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/product-pack",
     },
+    ...(process.env.BREVO_API_KEY
+      ? [
+          {
+            resolve: "@medusajs/medusa/notification",
+            options: {
+              providers: [
+                {
+                  resolve: "./src/modules/notification-brevo",
+                  id: "brevo",
+                  options: {
+                    channels: ["email"],
+                    api_key: process.env.BREVO_API_KEY,
+                    from_email: process.env.BREVO_FROM_EMAIL,
+                    from_name: process.env.BREVO_FROM_NAME,
+                    reply_to_email: process.env.BREVO_REPLY_TO_EMAIL,
+                    reply_to_name: process.env.BREVO_REPLY_TO_NAME,
+                    templates: brevoTemplates,
+                  },
+                },
+              ],
+            },
+          },
+        ]
+      : []),
     {
       resolve: "@medusajs/medusa/cache-redis",
       options: { redisUrl: process.env.REDIS_URL },
