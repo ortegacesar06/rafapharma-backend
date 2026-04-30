@@ -28,6 +28,9 @@ module.exports = defineConfig({
       resolve: "./src/modules/order-routing",
     },
     {
+      resolve: "./src/modules/product-pack",
+    },
+    {
       resolve: "@medusajs/medusa/cache-redis",
       options: { redisUrl: process.env.REDIS_URL },
     },

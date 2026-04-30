@@ -8,7 +8,7 @@ Tienda virtual de suplementos (fitness) para Ecuador. **Backend headless** en Me
 2. **Respeta las decisiones D1–D11** (resumidas abajo). No las rediscutas a menos que el usuario lo pida explícitamente.
 3. **Sigue las fases en orden** — cada fase depende de la anterior. La fase actual está marcada en la sección "Estado actual" del plan.
 
-## Decisiones bloqueadas (D1–D11)
+## Decisiones bloqueadas (D1–D13)
 
 | # | Decisión |
 |---|---|
@@ -24,6 +24,7 @@ Tienda virtual de suplementos (fitness) para Ecuador. **Backend headless** en Me
 | D10 | Email: Brevo (SDK `@getbrevo/brevo`) |
 | D11 | Pagos: 3 providers (PayPhone + DeUna + transferencia manual). Solo transferencia manual activa al go-live; PayPhone y DeUna desactivados en config hasta cierre de contratos |
 | D12 | Ruteo en `order.placed` (Fase 4) solo persiste decisión + ajusta reservaciones; NO crea Fulfillments automáticos. Fallback unified sin bodega completa → `requires_manual_routing`. Cantón destino en `shipping_address.metadata.canton_id` |
+| D13 | Pack = Product extendido vía módulo `product-pack` (link 1:1 + tabla `PackItem`). Stock del pack se calcula on-the-fly desde componente más escaso. Pack en carrito fuerza unified shipment automáticamente; expansión a componentes ocurre en `compute-routing-plan` antes de buildRoutingPlan |
 
 ## Convenciones de arquitectura
 

@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-26 (Fase 4)
+> **Última actualización**: 2026-04-29 (Fase 5)
 
 ---
 
@@ -46,6 +46,7 @@
 | D9 | Estructura = solo backend (sin monorepo) | Storefront se construirá aparte cuando se decida; este repo es backend headless |
 | D10 | Email provider = Brevo (transaccional + listas) | Free tier suficiente para arranque, SDK oficial, soporta listas para flash promo emails |
 | D12 | Fase 4: ruteo en `order.placed` solo **persiste decisión + ajusta reservaciones**, **NO crea Fulfillments** automáticos (Opción A). Si modo `unified` no encuentra bodega completa, orden queda `requires_manual_routing` (no split, no cancelar). El cantón destino se lee de `shipping_address.metadata.canton_id`. | Mantiene control humano sobre el despacho físico. Marcar para revisión manual es lo más conservador frente a contradecir el flag o cancelar la orden. |
+| D13 | Pack = Product extendido vía módulo `product-pack` separado (link 1:1 Product↔ProductPack + tabla `PackItem` con (pack_id, variant_id, quantity)). Stock del pack se calcula on-the-fly desde el componente más escaso (NO se mantiene inventario propio del pack). Cualquier pack en el carrito **fuerza unified shipment** automáticamente; expansión de packs ocurre en `compute-routing-plan` antes de buildRoutingPlan, así reservaciones aterrizan en componentes vía el flujo existente. | Reutiliza pricing/imágenes/SEO/búsqueda nativos de Medusa. Calcular stock vía componentes elimina contadores en sync. Forzar unified evita que un pack llegue partido en envíos distintos. Sin workflow nuevo: el `replace-order-reservations` existente cubre el caso. |
 | D11 | Pagos = **3 providers independientes**: (a) PayPhone (tarjeta + QR), (b) DeUna API directa, (c) transferencia manual. **Rollout en fases**: solo (c) activa al inicio; (a) y (b) se prenden cuando se cierren los contratos con cada proveedor. Cada provider es un módulo Medusa que se activa/desactiva en `medusa-config.ts` (región Ecuador → `payment_providers`). | Permite lanzar la tienda con el método más simple (sin dependencia de contratos); luego prender PayPhone y DeUna sin reescribir código. |
 
 ---
@@ -85,8 +86,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 4 completa, pendiente commit.
-**Próximo paso**: Fase 5 → paso 5.1.
+**Fase activa**: Fase 5 completa, pendiente commit.
+**Próximo paso**: Fase 6 → paso 6.1.
 
 ---
 
@@ -167,22 +168,15 @@ src/
 
 **Objetivo**: Crear packs como productos compuestos con BOM, stock controlado por componente.
 
-- [ ] **5.1** Crear módulo `src/modules/product-pack/`:
-  - Modelos:
-    - `Pack` (extiende o linkea a Product — el pack es un Product con `is_pack=true` o tiene su propio modelo + link).
-    - `PackItem` (pack_id, variant_id, quantity).
-  - Decisión técnica pendiente: ¿Pack es Product extendido o entidad separada con link? Recomendación: **Pack como Product** (con flag o categoría especial) + tabla `PackItem` aparte. Así aprovecha pricing, imágenes, SEO de Product.
-- [ ] **5.2** Module link `Pack ↔ ProductVariant` (vía PackItem).
-- [ ] **5.3** Admin UI / endpoints CRUD para componer packs.
-- [ ] **5.4** Workflow `reserve-pack-inventory`:
-  - Cuando se compra un pack, reservar/decrementar stock de cada componente según `PackItem.quantity` × `OrderItem.quantity`.
-  - Integrar con workflow de fulfillment (Fase 4): un pack con ítems requiere que TODOS los componentes vengan de la misma bodega → forza `unified` automáticamente.
-- [ ] **5.5** Subscriber a `order.placed` (o integrarlo en el de Fase 4) ejecuta el workflow.
-- [ ] **5.6** Endpoint store: packs aparecen en `/store/products` como cualquier producto.
-- [ ] **5.7** Tests:
-  - Crear pack con 3 componentes.
-  - Comprar pack → cada componente decrementa stock.
-  - Pack en carrito → fuerza unified shipment.
+- [x] **5.1** Módulo `src/modules/product-pack/` con modelos `ProductPack` (`product_id` único) y `PackItem` (`pack_id`, `variant_id`, `quantity`, índice único `(pack_id, variant_id)`). Migración `Migration20260430024414.ts`. Cf. D13.
+- [x] **5.2** Module link Product↔ProductPack en `src/links/product-pack.ts` (1:1). El link Pack↔Variant se materializa por columna `variant_id` en `PackItem` (sin defineLink adicional: PackItem ES la tabla pivote).
+- [x] **5.3** Admin endpoint `GET/POST/DELETE /admin/products/:id/pack` (`src/api/admin/products/[id]/pack/route.ts`): GET retorna pack+items, POST hace upsert (crea ProductPack + link en el primer POST, reemplaza items completos), DELETE quita el pack.
+- [x] **5.4** Integración con fulfillment Fase 4: función pura `expandPackItems` (`src/workflows/fulfillment/expand-pack-items.ts`) y nueva fase en `compute-routing-plan` que primero resuelve `product.product_pack.items` para los variant_ids del input, expande items pack→componentes (qty×qty, conserva line_item_id) y marca `requires_unified_shipment=true` para forzar unified. **No se creó un workflow `reserve-pack-inventory` separado**: el `replace-order-reservations` existente reserva ya contra los inventory items de los componentes porque la expansión ocurre upstream en el plan.
+- [x] **5.5** Cubierto por 5.4 — el subscriber existente `route-order-fulfillment` ejecuta la cadena `route-fulfillment` que ya incluye expansión + reservaciones. No se agrega subscriber nuevo.
+- [x] **5.6** Sin trabajo extra: `ProductPack` linkea con `Product`, así que el pack ya aparece en `/store/products` como cualquier otro producto.
+- [x] **5.7** Tests:
+  - Unit: `expand-pack-items.unit.spec.ts` (4 escenarios: sin packs, pack puro, pack+items normales mezclados, pack con items vacíos).
+  - Integration:modules: `product-pack.spec.ts` (creación con items, unique por product_id, unique (pack_id, variant_id), reemplazo de items).
 
 **Criterio de hecho**: admin crea un pack, cliente lo compra, stock de componentes baja correctamente, envío sale unificado.
 
@@ -333,3 +327,4 @@ src/
 | 2026-04-26 | Fase 2 completada. Módulo `warehouse-routing` con `WarehouseServiceArea`, links a StockLocation y Canton, CRUD admin, seed Quito+Guayaquil (442 service areas) y tests integration:modules. | Base para el ruteo geográfico de fulfillment. |
 | 2026-04-26 | Fase 4 completada. Módulo `order-routing` (`OrderRouting` 1:1 a Order vía link, `OrderRoutingShipment` hasMany). Workflows `suggest-warehouse` y `route-fulfillment` con steps separados (carga input, computa plan, persiste, reemplaza reservaciones). Algoritmo extraído a función pura `buildRoutingPlan` para tests unitarios de los 4 escenarios sin DB. Subscriber a `order.placed`. Endpoint `POST /store/cart/shipping-preview`. Decidido D12: la fase 4 NO crea Fulfillments automáticos (solo persiste ruteo + reservaciones); fallback unified sin bodega completa = `requires_manual_routing`. Cantón destino se lee de `shipping_address.metadata.canton_id`. | Habilita ruteo automático en checkout y al confirmar orden, manteniendo control humano sobre el despacho físico. |
 | 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
+| 2026-04-29 | Fase 5 completada (D13 nueva). Módulo `product-pack` con `ProductPack`/`PackItem`, link 1:1 a Product, admin endpoint upsert + delete. Integración con fulfillment vía expansión pura `expandPackItems` dentro de `compute-routing-plan`: si una variante del input es de un Product que tiene ProductPack, se reemplaza por sus componentes (qty×qty, mismo line_item_id) antes de buildRoutingPlan, y se fuerza `requires_unified_shipment=true` para todos. Reservaciones aterrizan en componentes vía `replace-order-reservations` existente — no hizo falta workflow `reserve-pack-inventory` separado. Stock del pack se calcula on-the-fly desde el componente más escaso (no se mantiene inventario propio). | Permite vender productos compuestos sin duplicar contadores de stock y aprovechando pricing/SEO/imágenes nativos de Product. |

@@ -10,6 +10,10 @@ import {
   type ServiceAreaPlain,
   type VariantDataPlain,
 } from "../build-routing-plan";
+import {
+  expandPackItems,
+  type PackComponent,
+} from "../expand-pack-items";
 import type { SuggestWarehouseInput, SuggestWarehouseOutput } from "../types";
 
 export const computeRoutingPlanStepId = "compute-routing-plan";
@@ -49,13 +53,50 @@ export const computeRoutingPlanStep = createStep(
       surcharge_amount: Number(sa.surcharge_amount),
     }));
 
-    const variantIds = Array.from(
+    const inputVariantIds = Array.from(
       new Set(input.items.map((i) => i.variant_id))
+    );
+
+    // 1) Resolve which input variants belong to a pack (Product → ProductPack → items).
+    const { data: packLookup } = await query.graph({
+      entity: "variant",
+      filters: { id: inputVariantIds },
+      fields: [
+        "id",
+        "product.product_pack.id",
+        "product.product_pack.items.variant_id",
+        "product.product_pack.items.quantity",
+      ],
+    });
+
+    const packComponentsByVariantId = new Map<string, PackComponent[]>();
+    for (const v of packLookup as any[]) {
+      const pack = v.product?.product_pack;
+      if (!pack || !Array.isArray(pack.items) || pack.items.length === 0) {
+        continue;
+      }
+      packComponentsByVariantId.set(
+        v.id,
+        pack.items.map((it: any) => ({
+          variant_id: it.variant_id,
+          quantity: Number(it.quantity),
+        }))
+      );
+    }
+
+    const { expandedItems, fromPackVariantIds, hasPacks } = expandPackItems({
+      items: input.items,
+      packComponentsByVariantId,
+    });
+
+    // 2) Resolve inventory + shipping rule for the EXPANDED variant set.
+    const expandedVariantIds = Array.from(
+      new Set(expandedItems.map((i) => i.variant_id))
     );
 
     const { data: variants } = await query.graph({
       entity: "variant",
-      filters: { id: variantIds },
+      filters: { id: expandedVariantIds },
       fields: [
         "id",
         "manage_inventory",
@@ -74,7 +115,7 @@ export const computeRoutingPlanStep = createStep(
       variants.map((v: any) => [v.id, v])
     );
 
-    const variantData: VariantDataPlain[] = input.items.map((item) => {
+    const variantData: VariantDataPlain[] = expandedItems.map((item) => {
       const v = variantById.get(item.variant_id);
       if (!v) {
         throw new MedusaError(
@@ -101,18 +142,22 @@ export const computeRoutingPlanStep = createStep(
         availableByLocation[level.location_id] = stocked - reserved;
       }
 
+      // D5 + Fase 5: si hay packs en la orden, fuerza unified para todos.
+      const requiresUnified =
+        hasPacks ||
+        fromPackVariantIds.has(item.variant_id) ||
+        Boolean(v.product?.shipping_rule?.requires_unified_shipment);
+
       return {
         variant_id: item.variant_id,
         inventory_item_id: inventoryLink.inventory_item_id,
         required_quantity: requiredQuantity,
-        requires_unified_shipment: Boolean(
-          v.product?.shipping_rule?.requires_unified_shipment
-        ),
+        requires_unified_shipment: requiresUnified,
         available_by_location: availableByLocation,
       };
     });
 
-    const plan = buildRoutingPlan(serviceAreas, variantData, input.items);
+    const plan = buildRoutingPlan(serviceAreas, variantData, expandedItems);
     return new StepResponse(plan);
   }
 );
