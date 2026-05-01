@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-04-30 (Fase 6 + Fase 8.1–8.4)
+> **Última actualización**: 2026-05-01 (Fase 8 completa)
 
 ---
 
@@ -86,8 +86,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 6 completa, pendiente commit. Fase 8.1–8.4 completas; quedan 8.5 (sync customers ↔ Brevo) y 8.6 (smoke test).
-**Próximo paso**: Fase 7 → paso 7.1 (AI Assistant).
+**Fase activa**: Fase 8 completa.
+**Próximo paso**: Fase 7 → paso 7.1 (AI Assistant). Decisiones a confirmar antes de arrancar: LLM (Claude vs OpenAI), vector store (pgvector vs externo), presupuesto/rate limit IA.
 
 ---
 
@@ -241,8 +241,8 @@ src/
 - [x] **8.2** `.env.template` con `BREVO_API_KEY`, `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME`, `BREVO_REPLY_TO_EMAIL`, `BREVO_REPLY_TO_NAME` y `BREVO_TEMPLATE_*` para los 4 templates iniciales.
 - [x] **8.3** Mapping de templates simbólicos (`order-placed`, `order-shipped`, `order-delivered`, `password-reset`) → IDs numéricos de Brevo vía `options.templates` (poblado desde env). Si no está mapeado pero el `template` es numérico, se usa directo. Templates HTML viven en el panel de Brevo (no como archivos en repo).
 - [x] **8.4** Subscriber `src/subscribers/order-placed-email.ts` resuelve `Modules.NOTIFICATION` y llama `createNotifications` con datos de orden (display_id, items, totales, shipping_address) leídos vía `query.graph`. Errores se loggean sin propagar para no bloquear ruteo de fulfillment.
-- [ ] **8.5** Sincronizar `Customer` con listas de Brevo (segmentos para flash promo emails).
-- [ ] **8.6** Tests de smoke: enviar a un email real en sandbox.
+- [x] **8.5** Módulo `src/modules/brevo-contacts/` (servicio thin sobre `@getbrevo/brevo`, sin modelos): `upsertContact` (createContact + `updateEnabled: true`), `deleteContact`, `addToList` / `removeFromList`, `getListContacts` (pagina 500/página). Opciones `default_list_id` + `segments: Record<string, number>` (poblado en `medusa-config.ts` desde envs `BREVO_LIST_<NOMBRE>`). Subscriber `customer-brevo-sync.ts` en `customer.created` / `customer.updated` upserta con FNAME/LNAME a la lista default (skip silencioso si el módulo no está cargado). El placeholder de `notify-flash-activation` ahora resuelve recipients vía `getListContacts` cuando el módulo está cargado y `notification_segment` mapea a una lista; fallback al query de customers cuando no.
+- [x] **8.6** Smoke test: script `src/scripts/smoke-brevo.ts` (correr con `TEST_EMAIL=… npx medusa exec ./src/scripts/smoke-brevo.ts`) que envía 1 email transaccional + upsert de contacto + verifica que aparece en la lista default. Tests unitarios `src/modules/brevo-contacts/__tests__/service.unit.spec.ts` con SDK mockeado (9 casos: validación, upsert con/sin lista, paginación, dedup por email vacío, addToList/removeFromList/deleteContact, resolveSegmentListId).
 
 **Criterio de hecho**: una orden colocada dispara email de confirmación al cliente.
 
@@ -322,4 +322,5 @@ src/
 | 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
 | 2026-04-30 | Fase 6 completada. Módulo `flash-promotion` (link 1:1 a Promotion nativo). Atomicidad implementada con `UPDATE ... WHERE units_sold + qty <= units_limit RETURNING` directo contra el EntityManager (sin transacción de Mikro), validado con test de 20 increments concurrentes. Decisión de ejecución: `order.placed` (subscriber dispara workflow `decrement-flash-units` que también desactiva la promo nativa al alcanzar límite). Activación de emails y expiración corren en cron `* * * * *` (`expire-flash-promotions`). Resolución de segmentos para emails es placeholder hasta Fase 8.5 (sync customers ↔ listas Brevo). | Habilita flash sales con countdown + límite global atómico. |
 | 2026-04-30 | Fase 8.1–8.4 completadas (adelantadas antes de Fase 6 porque 6.6 envía emails). Módulo `notification-brevo` con `@getbrevo/brevo` v5. Provider opt-in via `BREVO_API_KEY` env (si no está seteado, no se carga el módulo de notificaciones — evita romper dev/test). Subscriber `order-placed-email` ya activo. Falta 8.5 (sync customers ↔ listas Brevo) y 8.6 (smoke test real). | Habilita el envío de emails que requiere Fase 6.6 (activar flash promo). |
+| 2026-05-01 | Fase 8.5–8.6 completadas. Nuevo módulo `brevo-contacts` (servicio thin, sin modelos) loadeado solo si `BREVO_API_KEY` está seteado; expone upsert/delete/list-contacts y resuelve segmentos simbólicos vía env `BREVO_LIST_<NOMBRE>`. Subscriber sync customer→Brevo en `customer.created`/`customer.updated`. `notify-flash-activation` ahora consume listas Brevo cuando hay segmento, eliminando el placeholder de Fase 6.6. Smoke test manual via `src/scripts/smoke-brevo.ts`. | Cierra Fase 8 y conecta el flujo de flash-promo con segmentación real de listas. |
 | 2026-04-29 | Fase 5 completada (D13 nueva). Módulo `product-pack` con `ProductPack`/`PackItem`, link 1:1 a Product, admin endpoint upsert + delete. Integración con fulfillment vía expansión pura `expandPackItems` dentro de `compute-routing-plan`: si una variante del input es de un Product que tiene ProductPack, se reemplaza por sus componentes (qty×qty, mismo line_item_id) antes de buildRoutingPlan, y se fuerza `requires_unified_shipment=true` para todos. Reservaciones aterrizan en componentes vía `replace-order-reservations` existente — no hizo falta workflow `reserve-pack-inventory` separado. Stock del pack se calcula on-the-fly desde el componente más escaso (no se mantiene inventario propio). | Permite vender productos compuestos sin duplicar contadores de stock y aprovechando pricing/SEO/imágenes nativos de Product. |

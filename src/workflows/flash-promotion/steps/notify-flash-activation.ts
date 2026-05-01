@@ -2,6 +2,10 @@ import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { FLASH_PROMOTION_MODULE } from "../../../modules/flash-promotion"
 import type FlashPromotionModuleService from "../../../modules/flash-promotion/service"
+import {
+  BREVO_CONTACTS_MODULE,
+  type BrevoContactsModuleService,
+} from "../../../modules/brevo-contacts/service"
 
 export type NotifyFlashActivationInput = {
   promotion_id: string
@@ -43,7 +47,11 @@ export const notifyFlashActivationStep = createStep(
       return new StepResponse({ notified: false, recipients: 0 }, null)
     }
 
-    const recipients = await resolveSegmentRecipients(query, flash.notification_segment)
+    const recipients = await resolveSegmentRecipients(
+      container,
+      query,
+      flash.notification_segment
+    )
 
     let notification: any
     try {
@@ -85,27 +93,28 @@ export const notifyFlashActivationStep = createStep(
 )
 
 async function resolveSegmentRecipients(
+  container: any,
   query: any,
   segment: string | null
 ): Promise<string[]> {
-  // Por defecto: todos los customers con email. Cuando se implemente sync con
-  // listas de Brevo (Fase 8.5), `segment` mapeará a una lista específica.
-  if (!segment) {
-    const { data } = await query.graph({
-      entity: "customer",
-      fields: ["email"],
-      filters: { has_account: true },
-    })
-    return (data ?? [])
-      .map((c: { email?: string }) => c.email)
-      .filter((e: unknown): e is string => typeof e === "string" && e.length > 0)
+  let brevoContacts: BrevoContactsModuleService | undefined
+  try {
+    brevoContacts = container.resolve(BREVO_CONTACTS_MODULE) as BrevoContactsModuleService
+  } catch {
+    brevoContacts = undefined
   }
 
-  // Segmento explícito: hoy también devolvemos todos los customers; cuando
-  // exista la sync con listas de Brevo, este filtro se hará por tag/grupo.
+  if (brevoContacts) {
+    const listId = brevoContacts.resolveSegmentListId(segment)
+    if (listId) {
+      return brevoContacts.getListContacts(listId)
+    }
+  }
+
   const { data } = await query.graph({
     entity: "customer",
     fields: ["email"],
+    filters: segment ? {} : { has_account: true },
   })
   return (data ?? [])
     .map((c: { email?: string }) => c.email)

@@ -17,6 +17,19 @@ const brevoTemplates = Object.fromEntries(
   }).filter(([, v]) => v !== undefined)
 ) as Record<string, number>;
 
+const parseListId = (raw: string | undefined): number | undefined => {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+};
+
+const brevoSegments = Object.fromEntries(
+  Object.entries(process.env)
+    .filter(([k]) => k.startsWith("BREVO_LIST_"))
+    .map(([k, v]) => [k.replace("BREVO_LIST_", "").toLowerCase().replace(/_/g, "-"), parseListId(v)])
+    .filter(([, v]) => v !== undefined)
+) as Record<string, number>;
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -48,6 +61,18 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/flash-promotion",
     },
+    ...(process.env.BREVO_API_KEY
+      ? [
+          {
+            resolve: "./src/modules/brevo-contacts",
+            options: {
+              api_key: process.env.BREVO_API_KEY,
+              default_list_id: parseListId(process.env.BREVO_DEFAULT_LIST_ID),
+              segments: brevoSegments,
+            },
+          },
+        ]
+      : []),
     ...(process.env.BREVO_API_KEY
       ? [
           {
