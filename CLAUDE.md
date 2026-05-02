@@ -25,6 +25,7 @@ Tienda virtual de suplementos (fitness) para Ecuador. **Backend headless** en Me
 | D11 | Pagos: 3 providers (PayPhone + DeUna + transferencia manual). Solo transferencia manual activa al go-live; PayPhone y DeUna desactivados en config hasta cierre de contratos |
 | D12 | Ruteo en `order.placed` (Fase 4) solo persiste decisión + ajusta reservaciones; NO crea Fulfillments automáticos. Fallback unified sin bodega completa → `requires_manual_routing`. Cantón destino en `shipping_address.metadata.canton_id` |
 | D13 | Pack = Product extendido vía módulo `product-pack` (link 1:1 + tabla `PackItem`). Stock del pack se calcula on-the-fly desde componente más escaso. Pack en carrito fuerza unified shipment automáticamente; expansión a componentes ocurre en `compute-routing-plan` antes de buildRoutingPlan |
+| D14 | Chat IA: **Claude Haiku 4.5** (`claude-haiku-4-5`) + **Voyage AI** `voyage-3-lite` (512 dims) para embeddings + **pgvector** (extensión Postgres, índice ivfflat cosine). Anthropic no expone endpoint de embeddings → Voyage es el recomendado por Anthropic. Rate limit por hora en endpoint: 20 IP / 60 customer. System prompt cacheable vía `cache_control: ephemeral`. Tokens consumidos se loggean y persisten en `conversation_message` |
 
 ## Convenciones de arquitectura
 

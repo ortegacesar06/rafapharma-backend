@@ -14,6 +14,10 @@ const brevoTemplates = Object.fromEntries(
     "order-shipped": parseTemplateId(process.env.BREVO_TEMPLATE_ORDER_SHIPPED),
     "order-delivered": parseTemplateId(process.env.BREVO_TEMPLATE_ORDER_DELIVERED),
     "password-reset": parseTemplateId(process.env.BREVO_TEMPLATE_PASSWORD_RESET),
+    "bank-transfer-instructions": parseTemplateId(process.env.BREVO_TEMPLATE_BANK_TRANSFER_INSTRUCTIONS),
+    "bank-transfer-proof-received": parseTemplateId(process.env.BREVO_TEMPLATE_BANK_TRANSFER_PROOF_RECEIVED),
+    "bank-transfer-confirmed": parseTemplateId(process.env.BREVO_TEMPLATE_BANK_TRANSFER_CONFIRMED),
+    "bank-transfer-rejected": parseTemplateId(process.env.BREVO_TEMPLATE_BANK_TRANSFER_REJECTED),
   }).filter(([, v]) => v !== undefined)
 ) as Record<string, number>;
 
@@ -61,6 +65,19 @@ module.exports = defineConfig({
     {
       resolve: "./src/modules/flash-promotion",
     },
+    {
+      resolve: "./src/modules/ai-assistant",
+      options: {
+        anthropic_api_key: process.env.ANTHROPIC_API_KEY,
+        anthropic_model: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5",
+        voyage_api_key: process.env.VOYAGE_API_KEY,
+        voyage_model: process.env.VOYAGE_MODEL || "voyage-3-lite",
+        chat_rate_limit_per_hour_ip: Number(process.env.CHAT_RATE_LIMIT_PER_HOUR_IP || 20),
+        chat_rate_limit_per_hour_customer: Number(
+          process.env.CHAT_RATE_LIMIT_PER_HOUR_CUSTOMER || 60
+        ),
+      },
+    },
     ...(process.env.BREVO_API_KEY
       ? [
           {
@@ -97,6 +114,43 @@ module.exports = defineConfig({
           },
         ]
       : []),
+    {
+      resolve: "@medusajs/medusa/payment",
+      options: {
+        providers: [
+          ...(process.env.BANK_TRANSFER_ACCOUNT_NUMBER
+            ? [
+                {
+                  resolve: "./src/modules/payment-bank-transfer",
+                  id: "bank-transfer",
+                  options: {
+                    account_name: process.env.BANK_TRANSFER_ACCOUNT_NAME,
+                    account_number: process.env.BANK_TRANSFER_ACCOUNT_NUMBER,
+                    bank_name: process.env.BANK_TRANSFER_BANK_NAME,
+                    ruc: process.env.BANK_TRANSFER_RUC,
+                    reference_prefix: process.env.BANK_TRANSFER_REFERENCE_PREFIX || "RP",
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+    },
+    {
+      resolve: "@medusajs/medusa/file",
+      options: {
+        providers: [
+          {
+            resolve: "@medusajs/file-local",
+            id: "local",
+            options: {
+              upload_dir: process.env.FILE_UPLOAD_DIR || "static",
+              backend_url: `${process.env.MEDUSA_BACKEND_URL || "http://localhost:9000"}/static`,
+            },
+          },
+        ],
+      },
+    },
     {
       resolve: "@medusajs/medusa/cache-redis",
       options: { redisUrl: process.env.REDIS_URL },

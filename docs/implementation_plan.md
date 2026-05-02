@@ -1,7 +1,7 @@
 # Plan de implementación — Rafapharma Backend
 
 > Documento de progreso. Sobrevive entre sesiones. Marcar checkboxes al completar cada paso.
-> **Última actualización**: 2026-05-01 (Fase 8 completa)
+> **Última actualización**: 2026-05-01 (Fase 9.A completa)
 
 ---
 
@@ -86,8 +86,8 @@ src/
 
 ## Estado actual
 
-**Fase activa**: Fase 8 completa.
-**Próximo paso**: Fase 7 → paso 7.1 (AI Assistant). Decisiones a confirmar antes de arrancar: LLM (Claude vs OpenAI), vector store (pgvector vs externo), presupuesto/rate limit IA.
+**Fase activa**: Fase 9.A completa (transferencia manual lista para go-live).
+**Próximo paso**: Fase 9.B (PayPhone, espera contrato) o Fase 9.D (selección de método en checkout).
 
 ---
 
@@ -206,26 +206,18 @@ src/
 
 **Objetivo**: Chat IA que recomienda productos y responde dudas, con RAG sobre el catálogo.
 
-- [ ] **7.1** Crear módulo `src/modules/ai-assistant/`:
-  - Modelos: `Conversation` (customer_id nullable, started_at), `Message` (conversation_id, role, content, created_at).
-- [ ] **7.2** Module link `Customer ↔ Conversation` (para clientes logueados).
-- [ ] **7.3** Decidir LLM: **Claude API** (recomendado, ya tienes contexto). Alternativa: OpenAI.
-- [ ] **7.4** Pipeline RAG:
-  - Job que genera embeddings de productos (descripción, categoría, beneficios) al crear/actualizar.
-  - Vector store: pgvector (extensión Postgres, mantiene todo en una sola DB) vs. servicio externo (Pinecone, Weaviate). Recomendación: **pgvector**.
-- [ ] **7.5** Workflow `chat-respond`:
-  - Input: conversation_id, mensaje del usuario.
-  - Recuperar últimos N mensajes + top-K productos relevantes vía similarity search.
-  - Llamar Claude con system prompt + contexto + historial.
-  - Persistir respuesta.
-- [ ] **7.6** Endpoint store `POST /store/chat/messages`:
-  - Crea conversation si no existe (anónima o ligada a customer logueado).
-  - Devuelve respuesta del asistente.
-- [ ] **7.7** Subscriber a `product.created` / `product.updated` re-genera embedding.
-- [ ] **7.8** Tests:
-  - Embedding se genera al crear producto.
-  - Pregunta "¿qué proteína recomiendas para volumen?" → respuesta menciona productos relevantes del catálogo.
-- [ ] **7.9** Rate limiting + costo: limitar mensajes/hora por IP/customer. Logging de tokens consumidos.
+- [x] **7.1** Módulo `src/modules/ai-assistant/` con `Conversation` (`customer_id` nullable, `started_at`), `Message` (`conversation_id`, `role` enum user/assistant/system, `content`, `input_tokens`/`output_tokens` nullable) y `ProductEmbedding` (`product_id` único, `embedding_model`, `source_text`; columna `embedding vector(512)` agregada vía SQL raw en la migración). Migración `Migration20260501000000.ts` que también crea la extensión `vector` y un índice ivfflat para cosine similarity.
+- [x] **7.2** Module link `Customer ↔ Conversation` (1:N) en `src/links/customer-conversation.ts`.
+- [x] **7.3** Decisión confirmada: **Claude Haiku 4.5** (`claude-haiku-4-5`) vía `@anthropic-ai/sdk` con prompt caching del system prompt fijo. Embeddings con **Voyage AI** `voyage-3-lite` (512 dims) vía HTTP directo (sin SDK extra) — Anthropic no expone endpoint de embeddings.
+- [x] **7.4** Pgvector + Voyage. Servicio expone `upsertProductEmbedding`, `deleteProductEmbedding`, `findSimilarProducts` (raw SQL con `<=>`). Workflow `embed-product` (`src/workflows/ai-assistant/embed-product.ts`) lee producto vía `query.graph`, arma `source_text` (función pura `buildProductSourceText`: título + subtítulo + tipo + categorías + tags + descripción) y embebe con Voyage. Skip silencioso si `VOYAGE_API_KEY` falta.
+- [x] **7.5** Workflow `chat-respond` (`src/workflows/ai-assistant/chat-respond.ts`) compuesto por 5 steps con compensación: persiste user message → carga historial (últimos 12, orden ASC) → embebe query y recupera top-5 productos similares → llama Claude (system con `cache_control` ephemeral en prompt fijo + bloque RAG sin cache) → persiste respuesta con `input_tokens`/`output_tokens`. Funciones puras `buildContextBlock` y `buildAnthropicMessages` (filtra system, mergea consecutivos, garantiza primer turno user) extraídas para test sin SDK.
+- [x] **7.6** Endpoint `POST /store/chat/messages` (`src/api/store/chat/messages/route.ts`). Crea conversation si no existe; si hay customer logueado dispara `link.create` Customer↔Conversation. Body: `{ conversation_id?, message }`. Respuesta incluye `conversation_id`, `message`, `usage.{input,output}_tokens`.
+- [x] **7.7** Subscribers `embed-product` (en `product.created`/`product.updated`) y `delete-product-embedding` (en `product.deleted`). El primer skip silencioso si `VOYAGE_API_KEY` falta.
+- [x] **7.8** Tests unitarios:
+  - `voyage.unit.spec.ts` (4 escenarios para `buildProductSourceText`).
+  - `chat-respond.unit.spec.ts` (7 escenarios para `buildContextBlock` y `buildAnthropicMessages`).
+  - `ai-assistant.spec.ts` (integration:modules, 4 escenarios CRUD; requiere `.env.test` con DB y extensión vector — no corrido en esta sesión).
+- [x] **7.9** Rate limiting via módulo `cache` (Redis ya wired) — buckets por hora: `chat:rl:cust:<id>:<bucket>` (60/h por defecto) y `chat:rl:ip:<ip>:<bucket>` (20/h por defecto). Configurable vía `CHAT_RATE_LIMIT_PER_HOUR_*`. Logging de `input_tokens`/`output_tokens` en cada response del endpoint y persistido en `conversation_message`.
 
 **Criterio de hecho**: cliente chatea, el bot responde con recomendaciones del catálogo real.
 
@@ -256,14 +248,12 @@ src/
 
 ### 9.A — Transferencia manual (bloqueante para go-live)
 
-- [ ] **9.A.1** Provider `payment-bank-transfer` como módulo Medusa v2 implementando `Payment Provider`.
-  - Marca orden como `awaiting_payment` al checkout.
-  - Genera referencia única de pago.
-- [ ] **9.A.2** Endpoint `POST /store/orders/:id/payment-proof` para que el cliente suba comprobante (imagen/PDF). Usar módulo `File` de Medusa.
-- [ ] **9.A.3** Admin UI: lista de órdenes pendientes de verificar + botón confirmar/rechazar. Al confirmar → orden pasa a `paid`.
-- [ ] **9.A.4** Notificaciones (vía Fase 8): "comprobante recibido", "pago confirmado", "pago rechazado".
-- [ ] **9.A.5** Activar en `medusa-config.ts` región Ecuador.
-- [ ] **9.A.6** Tests: subir comprobante, aprobar, rechazar.
+- [x] **9.A.1** Provider `src/modules/payment-bank-transfer/` (`AbstractPaymentProvider`, identifier `bank-transfer`). `initiatePayment` retorna status `PENDING` con `data.status="awaiting_payment"`, `reference_suffix` (3 bytes hex), referencia provisional `RP-PENDING-<6hex>` y `bank_account` (account_name/number/bank/ruc desde envs). `authorizePayment` retorna `AUTHORIZED` para que la orden se pueda colocar; `capturePayment` marca `data.status="paid"`+`captured_at`; `cancelPayment` marca `data.status="rejected"`+`rejected_at`. Helpers puros `buildPendingReference` / `buildFinalReference` exportados (referencia final `RP-<display_id>-<suffix>` se construye al enviar la notificación, ya con el `display_id`).
+- [x] **9.A.2** `POST /store/orders/:id/payment-proof` (`src/api/store/orders/[id]/payment-proof/route.ts`) + middleware multer en `src/api/middlewares.ts` (memoryStorage, límite 10 MB, mime jpeg/png/webp/pdf). Valida `email` del body contra `order.email`, sube vía `uploadFilesWorkflow` (acceso `private`) y persiste `proof_file_id`/`proof_file_url`/`proof_uploaded_at`/`reference` en `order.metadata.bank_transfer`. Dispara notificación `bank-transfer-proof-received` (skip silencioso si `Modules.NOTIFICATION` no está cargado).
+- [x] **9.A.3** Endpoints admin `GET /admin/bank-transfers?status=pending|captured|rejected|all`, `POST /admin/bank-transfers/:id/confirm` (llama `paymentModule.capturePayment` con el `payment.amount`) y `POST /admin/bank-transfers/:id/reject` (body `{ reason? }`, llama `cancelPayment`, persiste `rejection_reason` en metadata). UI Admin en `src/admin/routes/bank-transfers/page.tsx` (sidebar "Transferencias", icon `CreditCard`): tabs Pendientes/Confirmados/Rechazados, link al comprobante, botones confirmar/rechazar con input de motivo opcional. Cada acción dispara la notificación correspondiente.
+- [x] **9.A.4** Subscriber `src/subscribers/bank-transfer-instructions.ts` en `order.placed`: si la orden tiene payment con provider `bank-transfer`, calcula la referencia final, la persiste en `order.metadata.bank_transfer.reference` y envía template `bank-transfer-instructions` (con monto, banco, referencia). Templates Brevo agregados al mapping en `medusa-config.ts`: `bank-transfer-instructions`, `bank-transfer-proof-received`, `bank-transfer-confirmed`, `bank-transfer-rejected` (env `BREVO_TEMPLATE_BANK_TRANSFER_*`).
+- [x] **9.A.5** Provider registrado en `medusa-config.ts` bajo `@medusajs/medusa/payment` (sólo si `BANK_TRANSFER_ACCOUNT_NUMBER` está seteado, mismo patrón que Brevo). También se registra `@medusajs/medusa/file` con `@medusajs/file-local` para los comprobantes. `src/scripts/seed.ts` asocia el provider a la región Ecuador (`pp_bank-transfer_bank-transfer`) cuando el env está presente; si no, sigue usando `pp_system_default`.
+- [x] **9.A.6** Tests: `src/modules/payment-bank-transfer/__tests__/service.unit.spec.ts` (13 escenarios sobre helpers de referencia, `validateOptions`, `initiatePayment`, authorize/capture/cancel/refund, `getPaymentStatus`, webhook). `npx tsc --noEmit` limpio. Tests integration de aprobar/rechazar end-to-end pendientes (requieren orden real con payment colection, igual que el resto de tests integration del proyecto).
 
 **Criterio de hecho 9.A**: cliente puede checkout, subir comprobante, y admin verificar manualmente. Tienda puede operar con solo este método.
 
@@ -322,5 +312,7 @@ src/
 | 2026-04-26 | Fase 3 completada. Módulo `product-shipping-rules` con flag `requires_unified_shipment` (1 fila por producto, link 1:1 a Product). Endpoint admin upsert + widget Admin UI con Switch. Decidido módulo separado en lugar de extender Product directamente: Medusa v2 no permite agregar columnas a entidades core, y el module link mantiene el aislamiento de D-arquitectura. | Habilita el flag para el ruteo de Fase 4. |
 | 2026-04-30 | Fase 6 completada. Módulo `flash-promotion` (link 1:1 a Promotion nativo). Atomicidad implementada con `UPDATE ... WHERE units_sold + qty <= units_limit RETURNING` directo contra el EntityManager (sin transacción de Mikro), validado con test de 20 increments concurrentes. Decisión de ejecución: `order.placed` (subscriber dispara workflow `decrement-flash-units` que también desactiva la promo nativa al alcanzar límite). Activación de emails y expiración corren en cron `* * * * *` (`expire-flash-promotions`). Resolución de segmentos para emails es placeholder hasta Fase 8.5 (sync customers ↔ listas Brevo). | Habilita flash sales con countdown + límite global atómico. |
 | 2026-04-30 | Fase 8.1–8.4 completadas (adelantadas antes de Fase 6 porque 6.6 envía emails). Módulo `notification-brevo` con `@getbrevo/brevo` v5. Provider opt-in via `BREVO_API_KEY` env (si no está seteado, no se carga el módulo de notificaciones — evita romper dev/test). Subscriber `order-placed-email` ya activo. Falta 8.5 (sync customers ↔ listas Brevo) y 8.6 (smoke test real). | Habilita el envío de emails que requiere Fase 6.6 (activar flash promo). |
+| 2026-05-01 | Fase 7 completada. Módulo `ai-assistant` con `Conversation`/`Message`/`ProductEmbedding`. Stack confirmado: Claude Haiku 4.5 (chat) + Voyage AI `voyage-3-lite` 512 dims (embeddings, vía HTTP directo) + pgvector con índice ivfflat cosine. Workflows `embed-product` y `chat-respond` (5 steps, RAG top-5, prompt caching del system prompt fijo). Endpoint `POST /store/chat/messages` con rate limit por hora vía módulo cache (20/h IP, 60/h customer) y log de tokens. Subscribers en `product.created/updated/deleted` mantienen sincronizada la tabla de embeddings. 11 unit tests nuevos (todos verdes), 4 integration tests pendientes de ejecutar (requieren extensión vector en DB de test). | Cierra Fase 7 — chat IA libre con RAG sobre catálogo real, manteniendo la separación módulo / workflow / endpoint y sin acoplar el módulo a credenciales (skip silencioso si falta `VOYAGE_API_KEY` o `ANTHROPIC_API_KEY`). |
 | 2026-05-01 | Fase 8.5–8.6 completadas. Nuevo módulo `brevo-contacts` (servicio thin, sin modelos) loadeado solo si `BREVO_API_KEY` está seteado; expone upsert/delete/list-contacts y resuelve segmentos simbólicos vía env `BREVO_LIST_<NOMBRE>`. Subscriber sync customer→Brevo en `customer.created`/`customer.updated`. `notify-flash-activation` ahora consume listas Brevo cuando hay segmento, eliminando el placeholder de Fase 6.6. Smoke test manual via `src/scripts/smoke-brevo.ts`. | Cierra Fase 8 y conecta el flujo de flash-promo con segmentación real de listas. |
+| 2026-05-01 | Fase 9.A completada. Provider `payment-bank-transfer` con referencia `RP-<display_id>-<6 hex>` (suffix generado en initiate, display_id resuelto al enviar la notificación post-`order.placed`). Datos bancarios via envs `BANK_TRANSFER_*`; provider opt-in (no se carga si la cuenta no está seteada). Upload de comprobantes con multer + `uploadFilesWorkflow` (acceso `private`) y `@medusajs/file-local` registrado. Admin UI en `/admin/bank-transfers` (lista por estado + confirmar/rechazar) usa `paymentModule.capturePayment`/`cancelPayment` directo. 4 templates Brevo nuevos (`bank-transfer-instructions/proof-received/confirmed/rejected`). Seed actualizado para asociar el provider a la región Ecuador cuando esté configurado. 13 unit tests verdes. | Habilita lanzamiento de la tienda con transferencia bancaria manual sin depender de contratos PayPhone/DeUna (D11). |
 | 2026-04-29 | Fase 5 completada (D13 nueva). Módulo `product-pack` con `ProductPack`/`PackItem`, link 1:1 a Product, admin endpoint upsert + delete. Integración con fulfillment vía expansión pura `expandPackItems` dentro de `compute-routing-plan`: si una variante del input es de un Product que tiene ProductPack, se reemplaza por sus componentes (qty×qty, mismo line_item_id) antes de buildRoutingPlan, y se fuerza `requires_unified_shipment=true` para todos. Reservaciones aterrizan en componentes vía `replace-order-reservations` existente — no hizo falta workflow `reserve-pack-inventory` separado. Stock del pack se calcula on-the-fly desde el componente más escaso (no se mantiene inventario propio). | Permite vender productos compuestos sin duplicar contadores de stock y aprovechando pricing/SEO/imágenes nativos de Product. |

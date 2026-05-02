@@ -74,7 +74,9 @@ export default async function seed({ container }: ExecArgs) {
           name: "Ecuador",
           currency_code: "usd",
           countries: ["ec"],
-          payment_providers: ["pp_system_default"],
+          payment_providers: process.env.BANK_TRANSFER_ACCOUNT_NUMBER
+            ? ["pp_bank-transfer_bank-transfer"]
+            : ["pp_system_default"],
         },
       ],
     },
